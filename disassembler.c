@@ -33,6 +33,7 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
+// decodes op code and calls relevant decoder
 void decode(const byte buffer[], size_t n) {
     unsigned i = 0;
     byte op_code, d, w;
@@ -40,33 +41,35 @@ void decode(const byte buffer[], size_t n) {
     while (i < n) {
         op_code = buffer[i] >> 2;
         switch (op_code) {
-            case 0b100010:
-                decode_mov(buffer, i, n);
+            case 0b100010:  // MOV
+                i = decode_mov(buffer, i, n);
                 break;
             default:
                 break;
         }
-
-        i++;
     }
 }
 
+// decodes the MOV instruction
 unsigned decode_mov(const byte buffer[], unsigned i, size_t n) {
     byte d, w, mod, reg, rm;
-    d = (buffer[i] >> 1) & 1;
-    w = buffer[i] & 1;
-    i++; // next byte in stream
-    mod = buffer[i] >> 6;
-    reg = (buffer[i] >> 3) & 0b111;
-    rm = buffer[i] & 0b111;
+    d = (buffer[i] >> 1) & 1;       // whether reg field is destination (1) or source (0)
+    w = buffer[i] & 1;              // whether this is a word (1) or byte (0) operation
+    i++;
+    mod = buffer[i] >> 6;           // register mode
+    reg = (buffer[i] >> 3) & 0b111; // register field encoding
+    rm = buffer[i] & 0b111;         // register/memory field encoding
+
     if (d == 1) {
         printf("mov %s, %s\n", lookup_register(w, reg), lookup_register(w, rm));
     } else {
         printf("mov %s, %s\n", lookup_register(w, rm), lookup_register(w, reg));
     }
-    return i;
+
+    return ++i;
 }
 
+// see chapter 4, page 20 of 8086 manual for these tables.
 char* lookup_register(byte w, byte reg) {
     if (w == 0) {
         switch (reg) {
