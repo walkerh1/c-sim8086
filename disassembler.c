@@ -1,13 +1,19 @@
 #include <stdio.h>
+#include <string.h>
 #include <assert.h>
 
 #define BUFFER_SIZE 1024
+#define STRLEN 20
 
 typedef unsigned char byte;
 
 void decode(const byte buffer[], size_t n);
 unsigned decode_move_im_to_reg(const byte buffer[], unsigned i, size_t n);
+unsigned decode_mov_mem_to_acc(const byte buffer[], unsigned i);
+unsigned decode_mov_acc_to_mem(const byte buffer[], unsigned i);
+unsigned decode_mov_im_to_rm(const byte buffer[], unsigned i);
 unsigned decode_mov_rm_to_from_reg(const byte buffer[], unsigned i, size_t n);
+unsigned print_effective_address(const byte buffer[], unsigned i, byte rm, byte mod);
 char* lookup_register(byte w, byte reg);
 char* lookup_effective_address(byte rm);
 
@@ -47,6 +53,16 @@ void decode(const byte buffer[], size_t n) {
 
         // check 7-bit op codes
         op_code >>= 1;
+        if (op_code == 0b1010000) {
+            i = decode_mov_mem_to_acc(buffer, i);
+            continue;
+        } else if (op_code == 0b1010001) {
+            i = decode_mov_acc_to_mem(buffer, i);
+            continue;
+        } else if (op_code == 0b1100011) {
+            i = decode_mov_im_to_rm(buffer, i);
+            continue;
+        }
 
         // check 6-bit op codes
         op_code >>= 1;
@@ -73,12 +89,12 @@ unsigned decode_move_im_to_reg(const byte buffer[], unsigned i, size_t n) {
     reg = buffer[i] & 0b111;        // destination register field encoding
     char* reg_name = lookup_register(w, reg);   // decoded register
     i++;
-    if (w) {
+    if (w == 1) {
         i++;
         unsigned short data = buffer[i-1] | (buffer[i] << 8);   // 16 bits of data goes in register
         printf("mov %s, %d\n", reg_name, data);
     } else {
-        printf("mov %s, %d\n", reg_name, buffer[i]);          // 8 bits of data goes in register
+        printf("mov %s, %d\n", reg_name, buffer[i]);            // 8 bits of data goes in register
     }
     return ++i;
 }
@@ -89,39 +105,93 @@ unsigned decode_mov_rm_to_from_reg(const byte buffer[], unsigned i, size_t n) {
     d = (buffer[i] >> 1) & 1;       // whether reg field is destination (1) or source (0)
     w = buffer[i] & 1;              // whether this is a word (1) or byte (0) operation
     i++;
-    mod = buffer[i] >> 6;           // register mode
+    mod = buffer[i] >> 6;           // mode field encoding
     reg = (buffer[i] >> 3) & 0b111; // register field encoding
     rm = buffer[i] & 0b111;         // register/memory field encoding
 
-    char *dest, *source;
-    if (mod == 0b11) {          // register mode
-        dest = (d == 1) ? lookup_register(w, reg) : lookup_register(w, rm);
-        source = (d == 1) ? lookup_register(w, rm) : lookup_register(w, reg);
-        printf("mov %s, %s\n", dest, source);
-    } else if (mod == 0b00) {   // memory mode: no displacement (unless rm == 0b110)
+    printf("mov ");
+
+    if (mod == 0b11) {              // register mode
+        char *dest = (d == 1) ? lookup_register(w, reg) : lookup_register(w, rm);
+        char *source = (d == 1) ? lookup_register(w, rm) : lookup_register(w, reg);
+        printf("%s, %s", dest, source);
+    } else {                        // memory mode
         if (d == 1) {
-            printf("mov %s, [%s]\n", lookup_register(w, reg), lookup_effective_address(rm));
+            printf("%s, ", lookup_register(w, reg));
+            i = print_effective_address(buffer, i, rm, mod);
         } else {
-            printf("mov [%s], %s\n", lookup_effective_address(rm), lookup_register(w, reg));
-        }
-    } else if (mod == 0b01) {   // memory mode: 8-bit displacement
-        i++;
-        if (d == 1) {
-            printf("mov %s, [%s + %d]\n", lookup_register(w, reg), lookup_effective_address(rm), buffer[i]);
-        } else {
-            printf("mov [%s + %d], %s\n", lookup_effective_address(rm), buffer[i], lookup_register(w, reg));
-        }
-    } else if (mod == 0b10) {   // memory mode: 16-bit displacement
-        i += 2;
-        unsigned short address = buffer[i-1] | (buffer[i] << 8);
-        if (d == 1) {
-            printf("mov %s, [%s + %d]\n", lookup_register(w, reg), lookup_effective_address(rm), address);
-        } else {
-            printf("mov [%s + %d], %s\n", lookup_effective_address(rm), address, lookup_register(w, reg));
+            i = print_effective_address(buffer, i , rm, mod);
+            printf(", %s", lookup_register(w, reg));
         }
     }
 
+    putchar('\n');
     return ++i;
+}
+
+unsigned decode_mov_mem_to_acc(const byte buffer[], unsigned i) {
+    i += 2;
+    unsigned short address = buffer[i-1] | (buffer[i] << 8);
+    printf("mov ax [%d]\n", address);
+    return ++i;
+}
+
+unsigned decode_mov_acc_to_mem(const byte buffer[], unsigned i) {
+    i += 2;
+    unsigned short address = buffer[i-1] | (buffer[i] << 8);
+    printf("mov [%d] ax\n", address);
+    return ++i;
+}
+
+unsigned decode_mov_im_to_rm(const byte buffer[], unsigned i) {
+    byte w, mod, rm;
+    w = buffer[i] & 1;              // whether this is a word (1) or byte (0) operation
+    i++;
+    mod = buffer[i] >> 6;           // mode field encoding
+    rm = buffer[i] & 0b111;         // register/memory field encoding0
+
+    printf("mov ");
+    i = print_effective_address(buffer, i, rm, mod);
+    if (w == 1) {
+        i += 2;
+        unsigned short address = buffer[i-1] | (buffer[i] << 8);
+        printf(", word %d", address);
+    } else {
+        i++;
+        printf(", byte %d", buffer[i]);
+    }
+
+    putchar('\n');
+    return ++i;
+}
+
+unsigned print_effective_address(const byte buffer[], unsigned i, byte rm, byte mod) {
+    if (mod == 0b00) {          // no displacement (unless rm == 0b110)
+        if (rm == 0b110) {
+            i += 2;
+            unsigned short address = buffer[i-1] | (buffer[i] << 8);
+            printf("[%d]", address);
+        } else {
+            printf("[%s]", lookup_effective_address(rm));
+        }
+    } else if (mod == 0b01) {   // 8-bit displacement
+        i++;
+        if (buffer[i] == 0) {
+            printf("[%s]", lookup_effective_address(rm));
+        } else {
+            printf("[%s + %d]", lookup_effective_address(rm), buffer[i]);
+        }
+    } else if (mod == 0b10) {   // 16-bit displacement
+        i += 2;
+        unsigned short address = buffer[i-1] | (buffer[i] << 8);
+        if (address == 0) {
+            printf("[%s]", lookup_effective_address(rm));
+        } else {
+            printf("[%s + %d]", lookup_effective_address(rm), address);
+        }
+    }
+
+    return i;
 }
 
 // see chapter 4, page 20 of 8086 manual for these tables.
