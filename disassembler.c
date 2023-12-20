@@ -11,7 +11,7 @@
 typedef unsigned char byte;
 
 void decode(const byte buffer[], size_t n);
-unsigned decode_mov_im_to_reg(const byte buffer[], unsigned i, size_t n);
+unsigned decode_mov_im_to_reg(const byte buffer[], unsigned i);
 unsigned decode_mov_mem_to_acc(const byte buffer[], unsigned i);
 unsigned decode_mov_acc_to_mem(const byte buffer[], unsigned i);
 unsigned decode_mov_im_to_rm(const byte buffer[], unsigned i);
@@ -53,6 +53,39 @@ void decode(const byte buffer[], size_t n) {
 
     while (i < n) {
         op_code = buffer[i];
+
+        // check 8-bit op codes
+        if (op_code == 0b01110100) {            // JE: jump on equal
+            printf("je %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01111100) {     // JL: jump on less
+            printf("jl %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01111110) {     // JLE: jump on less or equal
+            printf("jle %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01110010) {     // JB: jump on below
+            printf("jb %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01110110) {     // JBE: jump on below or equal
+            printf("jbe %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01111010) {     // JPE: jump on parity even
+            printf("jpe %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01110000) {     // JO: jump on overflow
+            printf("jo %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01111000) {     // JS: jump on sign
+            printf("js %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01110101) {     // JNZ: jump on not zero
+            printf("jnz %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01111101) {     // JGE: jump on greater or equal
+            printf("jge %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01111111) {     // JG: jump on greater
+            printf("jg %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01110011) {     // JAE: jump on above or equal
+            printf("jae %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01110111) {     // JA: jump on above
+            printf("ja %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01111011) {     // JPO: jump on parity odd
+            printf("jnp %d\n", (signed char)buffer[++i]);
+        } else if (op_code == 0b01110001) {     // JNO: jump not overflow
+            printf("jno %d\n", (signed char)buffer[++i]);
+        }
 
         // check 7-bit op codes
         op_code >>= 1;
@@ -98,7 +131,7 @@ void decode(const byte buffer[], size_t n) {
         // check 4-bit op codes
         op_code >>= 2;
         if (op_code == 0b1011) {            // MOV immediate to register
-            i = decode_mov_im_to_reg(buffer, i, n);
+            i = decode_mov_im_to_reg(buffer, i);
             continue;
         }
 
@@ -107,7 +140,7 @@ void decode(const byte buffer[], size_t n) {
 }
 
 // MOV immediate to register
-unsigned decode_mov_im_to_reg(const byte buffer[], unsigned i, size_t n) {
+unsigned decode_mov_im_to_reg(const byte buffer[], unsigned i) {
     byte w, reg;
     w = (buffer[i] >> 3) & 1;       // whether the immediate is 8-bits (0) or 16-bits (1)
     reg = buffer[i] & 0b111;        // destination register field encoding
