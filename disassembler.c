@@ -8,6 +8,8 @@
 #define SUB '2'
 #define CMP '3'
 
+#define abs(x) (x < 0) ? (-x) : (x)
+
 typedef unsigned char byte;
 
 void decode(const byte buffer[], size_t n);
@@ -148,10 +150,10 @@ unsigned decode_mov_im_to_reg(const byte buffer[], unsigned i) {
     i++;
     if (w == 1) {
         i++;
-        unsigned short data = buffer[i-1] | (buffer[i] << 8);   // 16 bits of data goes in register
+        short data = buffer[i-1] | (buffer[i] << 8);                // 16 bits of data goes in register
         printf("mov %s, %d\n", reg_name, data);
     } else {
-        printf("mov %s, %d\n", reg_name, buffer[i]);            // 8 bits of data goes in register
+        printf("mov %s, %d\n", reg_name, (signed char)buffer[i]);   // 8 bits of data goes in register
     }
     return ++i;
 }
@@ -219,14 +221,14 @@ unsigned decode_arithmetic_im_to_rm(const byte buffer[], unsigned i) {
         i = print_effective_address(buffer, i, rm, mod);
     }
 
-    if (s == 1 && w == 1) {     // sign extend
-        unsigned short data = (buffer[++i] << 8) >> 8;
-        printf(", %d", (signed)data);
-    } else if (s == 0 && w == 1) { // read word of data
+    if (s == 1 && w == 1) {         // sign extend
+        short data = ((signed char)buffer[++i] << 8) >> 8;
+        printf(", %d", data);
+    } else if (s == 0 && w == 1) {  // read word of data
         i += 2;
         unsigned short data = buffer[i-1] | (buffer[i] << 8);
         printf(", %u", data);
-    } else { // read byte of data
+    } else {                        // read byte of data
         printf(", %u", buffer[++i]);
     }
 
@@ -248,8 +250,8 @@ unsigned decode_im_to_acc(const byte buffer[], unsigned i, char op) {
 
     if (w == 1) {
         i += 2;
-        unsigned short data = buffer[i-1] | (buffer[i] << 8);
-        printf("ax %u", data);
+        short data = buffer[i-1] | (buffer[i] << 8);
+        printf("ax %d", data);
     } else {
         printf("al %d", (signed char)buffer[++i]);
     }
@@ -305,7 +307,7 @@ unsigned decode_mov_im_to_rm(const byte buffer[], unsigned i) {
 
 // calculates and prints the effective address based on rm and mod
 unsigned print_effective_address(const byte buffer[], unsigned i, byte rm, byte mod) {
-    if (mod == 0b00) {          // no displacement (unless rm == 0b110, in which case direct address)
+    if (mod == 0b00) {          // no displacement (unless rm == 0b110, in which case 16-bit direct address)
         if (rm == 0b110) {
             i += 2;
             unsigned short address = buffer[i-1] | (buffer[i] << 8);
@@ -313,20 +315,25 @@ unsigned print_effective_address(const byte buffer[], unsigned i, byte rm, byte 
         } else {
             printf("[%s]", lookup_effective_address(rm));
         }
-    } else if (mod == 0b01) {   // 8-bit displacement
+    } else if (mod == 0b01) {   // 8-bit displacement (sign extend to 16 bits, see page 4-20 of manual)
         i++;
-        if (buffer[i] == 0) {
+        short address = ((signed char)buffer[i] << 8) >> 8;
+        if (address == 0) {
             printf("[%s]", lookup_effective_address(rm));
+        } else if (address > 0) {
+            printf("[%s + %d]", lookup_effective_address(rm), address);
         } else {
-            printf("[%s + %d]", lookup_effective_address(rm), buffer[i]);
+            printf("[%s - %d]", lookup_effective_address(rm), abs(address));
         }
     } else if (mod == 0b10) {   // 16-bit displacement
         i += 2;
-        unsigned short address = buffer[i-1] | (buffer[i] << 8);
+        short address = buffer[i-1] | (buffer[i] << 8); // parse as signed
         if (address == 0) {
             printf("[%s]", lookup_effective_address(rm));
-        } else {
+        } else if (address > 0) {
             printf("[%s + %d]", lookup_effective_address(rm), address);
+        } else {
+            printf("[%s - %d]", lookup_effective_address(rm), abs(address));
         }
     }
 
