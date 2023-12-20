@@ -3,16 +3,21 @@
 #include <assert.h>
 
 #define BUFFER_SIZE 1024
-#define STRLEN 20
+#define MOV '0'
+#define ADD '1'
+#define SUB '2'
+#define CMP '3'
 
 typedef unsigned char byte;
 
 void decode(const byte buffer[], size_t n);
-unsigned decode_move_im_to_reg(const byte buffer[], unsigned i, size_t n);
+unsigned decode_mov_im_to_reg(const byte buffer[], unsigned i, size_t n);
 unsigned decode_mov_mem_to_acc(const byte buffer[], unsigned i);
 unsigned decode_mov_acc_to_mem(const byte buffer[], unsigned i);
 unsigned decode_mov_im_to_rm(const byte buffer[], unsigned i);
-unsigned decode_mov_rm_to_from_reg(const byte buffer[], unsigned i, size_t n);
+unsigned decode_rm_reg(const byte buffer[], unsigned i, char op);
+unsigned decode_arithmetic_im_to_rm(const byte buffer[], unsigned i);
+unsigned decode_im_to_acc(const byte buffer[], unsigned i, char op);
 unsigned print_effective_address(const byte buffer[], unsigned i, byte rm, byte mod);
 char* lookup_register(byte w, byte reg);
 char* lookup_effective_address(byte rm);
@@ -49,32 +54,51 @@ void decode(const byte buffer[], size_t n) {
     while (i < n) {
         op_code = buffer[i];
 
-        // check 8-bit op codes
-
         // check 7-bit op codes
         op_code >>= 1;
-        if (op_code == 0b1010000) {
+        if (op_code == 0b1010000) {         // MOV memory to accumulator
             i = decode_mov_mem_to_acc(buffer, i);
             continue;
-        } else if (op_code == 0b1010001) {
+        } else if (op_code == 0b1010001) {  // MOV accumulator to memory
             i = decode_mov_acc_to_mem(buffer, i);
             continue;
-        } else if (op_code == 0b1100011) {
+        } else if (op_code == 0b1100011) {  // MOV immediate to register/memory
             i = decode_mov_im_to_rm(buffer, i);
+            continue;
+        } else if (op_code == 0b0000010) {  // ADD immediate to accumulator
+            i = decode_im_to_acc(buffer, i, ADD);
+            continue;
+        } else if (op_code == 0b0010110) {  // SUB immediate from accumulator
+            i = decode_im_to_acc(buffer, i, SUB);
+            continue;
+        } else if (op_code == 0b0011110) {  // CMP immediate from accumulator
+            i = decode_im_to_acc(buffer, i, CMP);
             continue;
         }
 
         // check 6-bit op codes
         op_code >>= 1;
-        if (op_code == 0b100010) {
-            i = decode_mov_rm_to_from_reg(buffer, i, n);
+        if (op_code == 0b100010) {          // MOV register/memory to or from register
+            i = decode_rm_reg(buffer, i, MOV);
+            continue;
+        } else if (op_code == 0b000000) {   // ADD register/memory with register and store result in either
+            i = decode_rm_reg(buffer, i, ADD);
+            continue;
+        } else if (op_code == 0b001010) {   // SUB register/memory from register or vice versa and store result in either
+            i = decode_rm_reg(buffer, i, SUB);
+            continue;
+        } else if (op_code == 0b001110) {   // CMP register/memory from register or vice versa and store result in either
+            i = decode_rm_reg(buffer, i, CMP);
+            continue;
+        } else if (op_code == 0b100000) {   // ADD/SUB/CMP immediate with register/memory
+            i = decode_arithmetic_im_to_rm(buffer, i);
             continue;
         }
 
         // check 4-bit op codes
         op_code >>= 2;
-        if (op_code == 0b1011) {
-            i = decode_move_im_to_reg(buffer, i, n);
+        if (op_code == 0b1011) {            // MOV immediate to register
+            i = decode_mov_im_to_reg(buffer, i, n);
             continue;
         }
 
@@ -83,7 +107,7 @@ void decode(const byte buffer[], size_t n) {
 }
 
 // MOV immediate to register
-unsigned decode_move_im_to_reg(const byte buffer[], unsigned i, size_t n) {
+unsigned decode_mov_im_to_reg(const byte buffer[], unsigned i, size_t n) {
     byte w, reg;
     w = (buffer[i] >> 3) & 1;       // whether the immediate is 8-bits (0) or 16-bits (1)
     reg = buffer[i] & 0b111;        // destination register field encoding
@@ -99,8 +123,8 @@ unsigned decode_move_im_to_reg(const byte buffer[], unsigned i, size_t n) {
     return ++i;
 }
 
-// MOV register/memory to or from register
-unsigned decode_mov_rm_to_from_reg(const byte buffer[], unsigned i, size_t n) {
+// MOV/ADD/SUB/CMP register/memory and register
+unsigned decode_rm_reg(const byte buffer[], unsigned i, char op) {
     byte d, w, mod, reg, rm;
     d = (buffer[i] >> 1) & 1;       // whether reg field is destination (1) or source (0)
     w = buffer[i] & 1;              // whether this is a word (1) or byte (0) operation
@@ -109,7 +133,15 @@ unsigned decode_mov_rm_to_from_reg(const byte buffer[], unsigned i, size_t n) {
     reg = (buffer[i] >> 3) & 0b111; // register field encoding
     rm = buffer[i] & 0b111;         // register/memory field encoding
 
-    printf("mov ");
+    if (op == MOV) {
+        printf("mov ");
+    } else if (op == ADD) {
+        printf("add ");
+    } else if (op == SUB) {
+        printf("sub ");
+    } else if (op == CMP) {
+        printf("cmp ");
+    }
 
     if (mod == 0b11) {              // register mode
         char *dest = (d == 1) ? lookup_register(w, reg) : lookup_register(w, rm);
@@ -129,6 +161,71 @@ unsigned decode_mov_rm_to_from_reg(const byte buffer[], unsigned i, size_t n) {
     return ++i;
 }
 
+// ADD/SUB/CMP immediate with register/memory
+unsigned decode_arithmetic_im_to_rm(const byte buffer[], unsigned i) {
+    byte s, w, mod, op, rm;
+    s = (buffer[i] >> 1) & 1;
+    w = buffer[i] & 1;
+    i++;
+    mod = buffer[i] >> 6;
+    op = (buffer[i] & 0b111000) >> 3;
+    rm = buffer[i] & 0b111;
+
+    if (op == 0b000) {
+        printf("add ");
+    } else if (op == 0b101) {
+        printf("sub ");
+    } else if (op == 0b111) {
+        printf("cmp ");
+    }
+
+    if (mod == 0b11) {
+        printf("%s", lookup_register(w, rm));
+    } else {
+        w == 1 ? printf("word ") : printf("byte ");
+        i = print_effective_address(buffer, i, rm, mod);
+    }
+
+    if (s == 1 && w == 1) {     // sign extend
+        unsigned short data = (buffer[++i] << 8) >> 8;
+        printf(", %d", (signed)data);
+    } else if (s == 0 && w == 1) { // read word of data
+        i += 2;
+        unsigned short data = buffer[i-1] | (buffer[i] << 8);
+        printf(", %u", data);
+    } else { // read byte of data
+        printf(", %u", buffer[++i]);
+    }
+
+    putchar('\n');
+    return ++i;
+}
+
+// ADD/SUB/CMP immediate with accumulator
+unsigned decode_im_to_acc(const byte buffer[], unsigned i, char op) {
+    byte w = buffer[i] & 1;
+
+    if (op == ADD) {
+        printf("add ");
+    } else if (op == SUB) {
+        printf("sub ");
+    } else if (op == CMP) {
+        printf("cmp ");
+    }
+
+    if (w == 1) {
+        i += 2;
+        unsigned short data = buffer[i-1] | (buffer[i] << 8);
+        printf("ax %u", data);
+    } else {
+        printf("al %d", (signed char)buffer[++i]);
+    }
+
+    putchar('\n');
+    return ++i;
+}
+
+// MOV memory to accumulator
 unsigned decode_mov_mem_to_acc(const byte buffer[], unsigned i) {
     i += 2;
     unsigned short address = buffer[i-1] | (buffer[i] << 8);
@@ -136,6 +233,7 @@ unsigned decode_mov_mem_to_acc(const byte buffer[], unsigned i) {
     return ++i;
 }
 
+// MOV accumulator to memory
 unsigned decode_mov_acc_to_mem(const byte buffer[], unsigned i) {
     i += 2;
     unsigned short address = buffer[i-1] | (buffer[i] << 8);
@@ -143,14 +241,16 @@ unsigned decode_mov_acc_to_mem(const byte buffer[], unsigned i) {
     return ++i;
 }
 
+// MOV immediate to register/memory
 unsigned decode_mov_im_to_rm(const byte buffer[], unsigned i) {
     byte w, mod, rm;
     w = buffer[i] & 1;              // whether this is a word (1) or byte (0) operation
     i++;
     mod = buffer[i] >> 6;           // mode field encoding
-    rm = buffer[i] & 0b111;         // register/memory field encoding0
+    rm = buffer[i] & 0b111;         // register/memory field encoding
 
     printf("mov ");
+    // TODO(hugo): need to check if mod == 11, in which case do not print effective address, just lookup register
     i = print_effective_address(buffer, i, rm, mod);
     if (w == 1) {
         i += 2;
@@ -165,8 +265,9 @@ unsigned decode_mov_im_to_rm(const byte buffer[], unsigned i) {
     return ++i;
 }
 
+// calculates and prints the effective address based on rm and mod
 unsigned print_effective_address(const byte buffer[], unsigned i, byte rm, byte mod) {
-    if (mod == 0b00) {          // no displacement (unless rm == 0b110)
+    if (mod == 0b00) {          // no displacement (unless rm == 0b110, in which case direct address)
         if (rm == 0b110) {
             i += 2;
             unsigned short address = buffer[i-1] | (buffer[i] << 8);
