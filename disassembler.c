@@ -283,8 +283,13 @@ unsigned decode_mov_im_to_rm(const byte buffer[], unsigned i) {
     rm = buffer[i] & 0b111;         // register/memory field encoding
 
     printf("mov ");
-    // TODO(hugo): need to check if mod == 11, in which case do not print effective address, just lookup register
-    i = print_effective_address(buffer, i, rm, mod);
+
+    if (mod == 0b11) {
+        printf("%d", buffer[++i]);
+    } else {
+        i = print_effective_address(buffer, i, rm, mod);
+    }
+
     if (w == 1) {
         i += 2;
         unsigned short address = buffer[i-1] | (buffer[i] << 8);
